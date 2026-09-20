@@ -1,87 +1,119 @@
 # Koode
 
-Koode is a compassionate WhatsApp-based palliative-care assistant for symptom tracking and caregiver coordination. It receives natural messages, including regional languages and casual slang, translates them into a structured clinical event, stores the event locally, and replies with empathy.
+## Overview
 
-## Architecture
+Koode is a compassionate WhatsApp-based palliative-care platform for symptom tracking, patient comfort, and caregiver coordination. It receives natural-language messages, translates them into structured clinical events, stores them in SQLite, responds empathetically, and gives care teams a live monitoring dashboard and printable clinical reports.
 
-- **FastAPI** receives Twilio WhatsApp webhooks and returns TwiML.
-- **OpenAI Structured Outputs** classifies the sender and extracts a strict `ClinicalExtraction` object.
-- **SQLite + SQLAlchemy** stores users and symptom logs in `koode.db`.
-- **Jinja2 + Tailwind CDN + vanilla JavaScript** render a live monitoring dashboard at `/dashboard`.
-- **Polling** refreshes `/api/events/recent` every five seconds without a WebSocket or Node build.
-- **AI reporting** generates date-filtered summaries at `/api/report/generate`; `/report/print` is optimized for Save as PDF.
-- **Issue workflow** lets care teams mark events resolved or reopen them, filter the live feed by all, medium/high attention, or high/critical urgency, and choose whether reports include resolved events.
+## Problem Statement
 
-## Setup
+Patients and caregivers often communicate symptoms through informal, multilingual, and incomplete messages. Care teams need a reliable way to capture those updates, identify urgent concerns, understand symptom trends, and coordinate follow-up without adding burden to the patient or caregiver.
+
+## Solution
+
+Koode connects Twilio WhatsApp messages to an OpenAI clinical extraction layer. Each message is classified as a patient or caregiver update, translated into formal clinical English, assigned a severity level, and saved as a timeline event. The dashboard highlights active concerns, supports patient and severity filters, allows issues to be resolved or reopened, and generates date-filtered AI summaries that can be printed as PDF reports.
+
+## Features
+
+* Multilingual and casual-language WhatsApp message intake
+* Empathetic patient and caregiver replies through Twilio TwiML
+* OpenAI Structured Outputs for clinical event extraction
+* Patient, severity, date-range, pagination, and resolved-status filters
+* Live dashboard polling with browser notifications and synthesized alert sounds
+* Interactive Events in feed, Needs attention, and High / critical views
+* Mark resolved and reopen workflow for individual issues
+* AI clinical executive summaries with Markdown rendering
+* IST timestamps for dashboard and printable reports
+* A4 print view containing only the selected date-range events
+* Safe deterministic fallback mode when OpenAI is unavailable
+
+## Tech Stack
+
+* *Frontend:* Jinja2 templates, Tailwind CSS CDN, vanilla JavaScript, Web Audio API, Notification API
+* *Backend:* Python, FastAPI, Uvicorn
+* *Database:* SQLite with SQLAlchemy
+* *APIs / Services:* OpenAI API, Twilio WhatsApp Sandbox API
+* *Hosting / Deployment:* Local Uvicorn server with ngrok for webhook exposure; deployable to any Python ASGI host
+* *Other Tools:* Pydantic, Jinja2, Git, browser print-to-PDF
+
+## Codex / OpenAI Usage
+
+OpenAI APIs power Koode's clinical workflows. Structured Outputs are used to extract `user_type`, translated clinical summaries, symptoms, severity, medications, and empathetic WhatsApp replies. A separate OpenAI prompt generates date-filtered clinical executive summaries.
+
+Codex and ChatGPT were used during the hackathon for:
+
+* Ideation and compassionate-care workflow design
+* FastAPI, SQLAlchemy, Twilio, and OpenAI architecture planning
+* Code generation for the webhook, AI extraction, dashboard, filters, and reports
+* Debugging webhook form-field and date/timezone issues
+* Testing with TestClient and curl
+* Documentation and local setup instructions
+* UI/UX development for the responsive monitoring dashboard
+
+AI helped turn unstructured WhatsApp messages into a working care coordination prototype while keeping a human-review and safety-oriented workflow.
+
+## Demo
+
+### Live Demo
+
+Add your deployed project link here, if available.
+
+Local dashboard:
+
+```text
+http://localhost:8000/dashboard
+```
+
+### Demo / Pitch Video
+
+Add your demo or pitch video link here.
+
+*A short demo/pitch video is strongly recommended. Show the WhatsApp message flow, dashboard alerts, patient filtering, resolved workflow, and AI report export.*
+
+## Screenshots
+
+Add screenshots of the Koode dashboard, WhatsApp response, alert filtering, and printable report here.
+
+## How to Run Locally
 
 Requirements: Python 3.10+ and a Twilio account with WhatsApp Sandbox access.
 
 ```bash
+git clone <repo-url>
+cd <project-folder>
 python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Set the values in `.env`. Koode loads this file automatically when the application starts:
+On Windows, activate the environment with `.venv\Scripts\activate`. Koode loads configuration automatically from `.env`:
 
-```bash
-OPENAI_API_KEY=sk-...
+```env
+OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-4o-mini
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 DATABASE_URL=sqlite:///./koode.db
 ```
 
-Start the server without exporting variables manually:
+Open the dashboard at `http://localhost:8000/dashboard`. For WhatsApp testing, run `ngrok http 8000` and configure the Twilio Sandbox webhook as:
 
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```text
+https://YOUR-NGROK-DOMAIN.ngrok-free.app/webhook/whatsapp
 ```
 
-The same server can be started with `python main.py`. Keep `.env` private; it is excluded by `.gitignore`. If `OPENAI_API_KEY` is missing, Koode uses its safe local fallback mode.
-
-## Connect the Twilio Sandbox
-
-1. Start the server and confirm `http://localhost:8000/health` returns `Koode is running`.
-2. In a second terminal, install ngrok and run:
-
-   ```bash
-   ngrok http 8000
-   ```
-
-3. Copy the HTTPS forwarding URL, such as `https://abc123.ngrok-free.app`.
-4. In the Twilio Console, open **Messaging > Try it out > Send a WhatsApp message > Sandbox settings**.
-5. Set **When a message comes in** to `https://abc123.ngrok-free.app/webhook/whatsapp` with method `POST`.
-6. Join the sandbox from your phone using Twilio's displayed join phrase.
-7. Send a message such as `I feel very breathless tonight` or a caregiver update in a regional language. Koode will respond and persist the event.
-
-If `TWILIO_AUTH_TOKEN` is set, Twilio signatures are verified. Keep signature validation enabled outside local testing.
-
-## Test without Twilio
-
-The webhook accepts standard Twilio form fields, so it can be exercised locally:
+You can test without Twilio:
 
 ```bash
 curl -X POST http://localhost:8000/webhook/whatsapp \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'From=whatsapp:+15551234567' \
-  --data-urlencode 'ProfileName=Demo Patient' \
-  --data-urlencode 'Body=My pain is medium today and I took paracetamol'
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "From=whatsapp:+15551234567" \
+  --data-urlencode "ProfileName=Demo Patient" \
+  --data-urlencode "Body=I feel tired today"
 ```
 
-The response is TwiML XML. Open `http://localhost:8000/dashboard` to monitor live events. The dashboard supports Last 24 Hours, Last 7 Days, Current Month, and custom date ranges. Enable browser notifications and sound if desired, then click **Generate AI report**. The result opens `/report/print` in a clean print view; use the browser print dialog to save it as PDF. The original `/report` 72-hour view remains available.
+## Additional Notes
 
-Click **Mark resolved** on an event to remove it from the default open-issues feed. Use **Include resolved** to bring resolved events back. The three summary cards are interactive: **Events in feed** shows all matching events, **Needs attention** shows medium/high events, and **High / critical** shows urgent events. The patient selector applies to both the feed and generated reports.
+Koode is a hackathon prototype and not an emergency service, diagnostic system, or replacement for a qualified clinician. The AI is instructed not to diagnose or invent medication, and urgent messages should still be reviewed by a human care team.
 
-## Data and safety
-
-The local database is created automatically at `koode.db`. The AI prompt explicitly forbids diagnosis and medication invention, but Koode is a hackathon prototype, not an emergency service or clinical decision maker. The reply tells users to contact emergency services for immediate danger; a human care team should review the generated report.
-
-## Files
-
-- `main.py`: FastAPI app, Twilio validation/webhook, live polling API, report generation, and print routes.
-- `ai_agent.py`: event extraction, clinical summary prompt, and deterministic fallbacks.
-- `database.py`: SQLAlchemy engine, models, DB dependency, and date-range query helper.
-- `templates/dashboard.html`: responsive monitoring dashboard with alerts, sound, notifications, and filters.
-- `templates/report_print.html`: high-contrast A4 clinical report template.
-- `templates/report.html`: legacy printable 72-hour clinical timeline.
+The application stores timestamps internally in UTC for reliable querying and displays user-facing timestamps in IST. SQLite creates `koode.db` automatically. The `.env` file and database are excluded from Git. Future improvements could include authentication, role-based access, encrypted production storage, durable multi-worker summary caching, clinician-to-patient assignment, and deployment monitoring.
