@@ -85,7 +85,7 @@ def get_logs_by_date_range(
     user_id: Optional[int] = None,
     include_resolved: bool = False,
 ) -> list[SymptomLog]:
-    """Return chronological logs in a half-open UTC date range.
+    """Return chronological logs in a UTC-normalized date range.
 
     Keeping this query in the data layer lets the dashboard, AI report endpoint,
     and printable report share exactly the same filtering behavior.

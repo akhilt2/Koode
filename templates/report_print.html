@@ -16,7 +16,7 @@
   </style>
 </head>
 <body>
-  <header><div><h1>Koode Clinical Report</h1><div class="muted">Palliative care monitoring and symptom timeline</div><div><strong>Patient identifier:</strong> {{ patient_identifier }}</div></div><div class="muted">Period: {{ start_date }} to {{ end_date }}<br>Generated: {{ generated_at }}</div></header>
+  <header><div><h1>Koode Clinical Report</h1><div class="muted">Palliative care monitoring and symptom timeline</div><div><strong>Patient identifier:</strong> {{ patient_identifier }}</div></div><div class="muted">Period: {{ start_date }} to {{ end_date }} (IST)<br>Generated: {{ generated_at }}</div></header>
   <section><h2>AI Executive Summary</h2><div class="summary">{{ summary_html }}</div></section>
   <section><h2>Chronological Events ({{ rows|length }})</h2>
     {% if rows %}<table><thead><tr><th>Timestamp</th><th>Patient / type</th><th>Symptoms</th><th>Clinical summary</th><th>Medication / treatment</th><th>Severity</th><th>Status</th></tr></thead><tbody>

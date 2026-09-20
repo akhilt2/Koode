@@ -12,6 +12,7 @@ import uuid
 from html import escape
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -36,6 +37,7 @@ templates = Environment(
 )
 # This is intentionally local and bounded for the hackathon's single-process demo.
 SUMMARY_CACHE: dict[str, dict] = {}
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @app.on_event("startup")
@@ -124,8 +126,8 @@ def _log_to_dict(log: SymptomLog) -> dict:
     return {
         "id": log.id,
         "user_id": log.user_id,
-        "created_at": timestamp.astimezone(timezone.utc).isoformat(),
-        "time": timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "created_at": timestamp.astimezone(IST).isoformat(),
+        "time": timestamp.astimezone(IST).strftime("%Y-%m-%d %H:%M IST"),
         "patient_name": log.user.display_name or log.user.whatsapp_number,
         "user_type": log.user_type,
         "summary": log.translated_english_summary,
@@ -204,7 +206,7 @@ def _markdown_to_html(markdown_text: str) -> Markup:
 
 
 def _parse_report_range(start_date: str, end_date: str) -> tuple[datetime, datetime, str, str]:
-    """Parse inclusive YYYY-MM-DD values into UTC datetimes."""
+    """Parse inclusive IST dates into UTC datetimes for database querying."""
     try:
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
@@ -213,8 +215,8 @@ def _parse_report_range(start_date: str, end_date: str) -> tuple[datetime, datet
     if end < start:
         raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
     return (
-        datetime.combine(start, time.min, tzinfo=timezone.utc),
-        datetime.combine(end, time.max, tzinfo=timezone.utc),
+        datetime.combine(start, time.min, tzinfo=IST).astimezone(timezone.utc),
+        datetime.combine(end, time.max, tzinfo=IST).astimezone(timezone.utc),
         start.isoformat(),
         end.isoformat(),
     )
@@ -251,7 +253,8 @@ def recent_events(
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             if since_dt.tzinfo is None:
-                since_dt = since_dt.replace(tzinfo=timezone.utc)
+                since_dt = since_dt.replace(tzinfo=IST)
+            since_dt = since_dt.astimezone(timezone.utc)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="since must be a valid ISO timestamp") from exc
         statement = select(SymptomLog).where(SymptomLog.created_at > since_dt)
@@ -377,7 +380,7 @@ def printable_report(
         ]
         summary = generate_clinical_summary(rows, start_label, end_label)
     html = templates.get_template("report_print.html").render(
-        generated_at=utc_now().strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"),
         start_date=start_label,
         end_date=end_label,
         summary=summary,
@@ -400,7 +403,7 @@ def clinical_report(db: Session = Depends(get_db)) -> HTMLResponse:
     """Legacy 72-hour report; the richer primary interface is /dashboard."""
     rows, urgent_count = _report_rows(db)
     html = templates.get_template("report.html").render(
-        generated_at=utc_now().strftime("%Y-%m-%d %H:%M UTC"), rows=rows, urgent_count=urgent_count
+        generated_at=datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"), rows=rows, urgent_count=urgent_count
     )
     return HTMLResponse(content=html)
 
