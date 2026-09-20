@@ -3,7 +3,9 @@
 import json
 import logging
 import os
+import re
 import uuid
+from html import escape
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -11,7 +13,8 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from markupsafe import Markup
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
@@ -129,6 +132,57 @@ def _log_to_dict(log: SymptomLog) -> dict:
     }
 
 
+def _markdown_to_html(markdown_text: str) -> Markup:
+    """Render the small, predictable Markdown subset used by report summaries.
+
+    The model output is escaped before formatting to prevent it from injecting
+    markup into a clinician's dashboard or printable report.
+    """
+    blocks = []
+    paragraph = []
+    list_items = []
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            blocks.append(f"<p>{'<br>'.join(paragraph)}</p>")
+            paragraph.clear()
+
+    def flush_list() -> None:
+        if list_items:
+            blocks.append(f"<ul>{''.join(f'<li>{item}</li>' for item in list_items)}</ul>")
+            list_items.clear()
+
+    for raw_line in markdown_text.splitlines():
+        line = escape(raw_line.strip())
+        if not line:
+            flush_paragraph()
+            flush_list()
+        elif line.startswith("### "):
+            flush_paragraph()
+            flush_list()
+            blocks.append(f"<h4>{line[4:]}</h4>")
+        elif line.startswith("## "):
+            flush_paragraph()
+            flush_list()
+            blocks.append(f"<h3>{line[3:]}</h3>")
+        elif line.startswith("# "):
+            flush_paragraph()
+            flush_list()
+            blocks.append(f"<h2>{line[2:]}</h2>")
+        elif re.match(r"^(?:[-*]|\d+\.)\s+", line):
+            flush_paragraph()
+            item = re.sub(r"^(?:[-*]|\d+\.)\s+", "", line)
+            item = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", item)
+            list_items.append(item)
+        else:
+            flush_list()
+            line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+            paragraph.append(line)
+    flush_paragraph()
+    flush_list()
+    return Markup("".join(blocks) or "<p>No summary was generated.</p>")
+
+
 def _parse_report_range(start_date: str, end_date: str) -> tuple[datetime, datetime, str, str]:
     """Parse inclusive YYYY-MM-DD values into UTC datetimes."""
     try:
@@ -150,9 +204,10 @@ def _parse_report_range(start_date: str, end_date: str) -> tuple[datetime, datet
 def recent_events(
     db: Session = Depends(get_db),
     since: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=5, le=100),
 ) -> JSONResponse:
-    """Polling feed for near-real-time dashboard updates."""
+    """Newest-first paginated feed plus incremental polling support."""
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -160,13 +215,41 @@ def recent_events(
                 since_dt = since_dt.replace(tzinfo=timezone.utc)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="since must be a valid ISO timestamp") from exc
-        statement = select(SymptomLog).where(SymptomLog.created_at > since_dt).order_by(SymptomLog.created_at.asc()).limit(limit)
-    else:
-        statement = select(SymptomLog).order_by(SymptomLog.created_at.desc()).limit(limit)
-    logs = list(db.scalars(statement).all())
-    if not since:
-        logs.reverse()
-    return JSONResponse(content={"events": [_log_to_dict(log) for log in logs]})
+        logs = list(
+            db.scalars(
+                select(SymptomLog)
+                .where(SymptomLog.created_at > since_dt)
+                .order_by(SymptomLog.created_at.desc())
+                .limit(100)
+            ).all()
+        )
+        return JSONResponse(content={"events": [_log_to_dict(log) for log in logs]})
+
+    total = db.scalar(select(func.count()).select_from(SymptomLog)) or 0
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+    logs = list(
+        db.scalars(
+            select(SymptomLog)
+            .order_by(SymptomLog.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+    )
+    attention_count = db.scalar(
+        select(func.count()).select_from(SymptomLog).where(SymptomLog.severity_level.in_(["medium", "high", "critical"]))
+    ) or 0
+    urgent_count = db.scalar(
+        select(func.count()).select_from(SymptomLog).where(SymptomLog.severity_level.in_(["high", "critical"]))
+    ) or 0
+    return JSONResponse(
+        content={
+            "events": [_log_to_dict(log) for log in logs],
+            "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages},
+            "counts": {"attention": attention_count, "urgent": urgent_count},
+        }
+    )
 
 
 class ReportRequest(BaseModel):
@@ -193,6 +276,7 @@ def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JS
         content={
             "summary_id": summary_id,
             "summary": summary,
+            "summary_html": str(_markdown_to_html(summary)),
             "event_count": len(rows),
             "empty": not rows,
             "print_url": f"/report/print?start_date={start_label}&end_date={end_label}&summary_id={summary_id}&autoprint=1",
@@ -220,6 +304,7 @@ def printable_report(
         start_date=start_label,
         end_date=end_label,
         summary=summary,
+        summary_html=_markdown_to_html(summary),
         rows=rows,
         patient_identifier=", ".join(dict.fromkeys(row["patient_name"] for row in rows)) or "No patient events",
     )

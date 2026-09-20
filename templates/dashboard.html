@@ -47,18 +47,19 @@
         <label class="text-sm font-semibold text-slate-700">To<input id="end-date" type="date" class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-koode-600 focus:outline-none"></label>
         <button id="generate-button" class="rounded-lg bg-koode-700 px-5 py-2.5 font-semibold text-white shadow-sm hover:bg-koode-900">Generate AI report</button>
       </div>
-      <div id="summary-box" class="mt-5 hidden rounded-xl border border-koode-100 bg-koode-50 p-5"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold text-koode-900">AI executive summary</h3><a id="print-link" target="_blank" class="rounded-lg bg-koode-700 px-3 py-2 text-sm font-semibold text-white hover:bg-koode-900">Open print view</a></div><pre id="summary-text" class="mt-3 whitespace-pre-wrap font-sans text-sm leading-6 text-slate-700"></pre></div>
+      <div id="summary-box" class="mt-5 hidden rounded-xl border border-koode-100 bg-koode-50 p-5"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold text-koode-900">AI executive summary</h3><a id="print-link" target="_blank" class="rounded-lg bg-koode-700 px-3 py-2 text-sm font-semibold text-white hover:bg-koode-900">Open print view</a></div><div id="summary-text" class="mt-3 space-y-3 text-sm leading-6 text-slate-700 [&_h2]:text-lg [&_h2]:font-bold [&_h3]:font-bold [&_h4]:font-semibold [&_p]:mt-2"></div></div>
     </section>
 
     <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><h2 class="text-lg font-bold text-slate-900">Live event feed</h2><p class="text-sm text-slate-500">Updates automatically every five seconds</p></div><span id="last-updated" class="text-xs text-slate-400">Waiting for events</span></div>
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><h2 class="text-lg font-bold text-slate-900">Live event feed</h2><p class="text-sm text-slate-500">Newest events first. New messages are checked every five seconds.</p></div><div class="flex items-center gap-3"><label class="text-xs font-semibold text-slate-600">Show <select id="page-size" class="ml-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"><option value="10">10</option><option value="25" selected>25</option><option value="50">50</option><option value="100">100</option></select></label><span id="last-updated" class="text-xs text-slate-400">Waiting for events</span></div></div>
       <div id="empty-state" class="p-10 text-center text-sm text-slate-500">No events yet. Incoming WhatsApp messages will appear here.</div>
       <div class="overflow-x-auto"><table id="events-table" class="hidden min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th class="px-5 py-3">Time</th><th class="px-5 py-3">Person</th><th class="px-5 py-3">Symptoms / summary</th><th class="px-5 py-3">Treatment</th><th class="px-5 py-3">Severity</th></tr></thead><tbody id="events-body" class="divide-y divide-slate-100"></tbody></table></div>
+      <div id="pagination" class="hidden items-center justify-between gap-3 border-t border-slate-200 px-5 py-4 text-sm"><span id="page-info" class="text-slate-500"></span><div class="flex gap-2"><button id="previous-page" class="rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40">Previous</button><button id="next-page" class="rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></div>
     </section>
   </main>
 
   <script>
-    const state = { events: new Map(), latest: null, sound: true };
+    const state = { events: [], latest: null, sound: true, page: 1, pageSize: 25, totalPages: 1, total: 0 };
     const $ = (id) => document.getElementById(id);
     const dateString = (date) => date.toISOString().slice(0, 10);
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
@@ -76,13 +77,16 @@
       if (severity === 'medium') return 'bg-amber-50 text-amber-800 ring-1 ring-amber-200';
       return 'bg-slate-100 text-slate-600';
     }
-    function render() {
-      const events = [...state.events.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      $('event-count').textContent = events.length;
-      $('attention-count').textContent = events.filter(e => ['medium','high','critical'].includes(e.severity_level)).length;
-      $('urgent-count').textContent = events.filter(e => ['high','critical'].includes(e.severity_level)).length;
+    function render(counts = { attention: 0, urgent: 0 }) {
+      const events = state.events;
+      $('event-count').textContent = state.total;
+      $('attention-count').textContent = counts.attention;
+      $('urgent-count').textContent = counts.urgent;
       $('empty-state').classList.toggle('hidden', events.length > 0); $('events-table').classList.toggle('hidden', events.length === 0);
       $('events-body').innerHTML = events.map(e => `<tr class="hover:bg-slate-50"><td class="whitespace-nowrap px-5 py-4 text-slate-500">${escapeHtml(e.time)}</td><td class="whitespace-nowrap px-5 py-4"><div class="font-semibold text-slate-800">${escapeHtml(e.patient_name)}</div><div class="text-xs text-slate-400">${escapeHtml(e.user_type)}</div></td><td class="max-w-md px-5 py-4"><div class="font-medium text-slate-800">${escapeHtml((e.symptoms || []).join(', ') || 'No specific symptom')}</div><div class="mt-1 text-xs leading-5 text-slate-500">${escapeHtml(e.summary)}</div></td><td class="max-w-xs px-5 py-4 text-slate-600">${escapeHtml(e.medications_given || 'None recorded')}</td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-bold uppercase ${severityClass(e.severity_level)}">${escapeHtml(e.severity_level)}</span></td></tr>`).join('');
+      $('pagination').classList.toggle('hidden', state.total === 0); $('pagination').classList.toggle('flex', state.total > 0);
+      $('page-info').textContent = `Page ${state.page} of ${state.totalPages} (${state.total} event${state.total === 1 ? '' : 's'})`;
+      $('previous-page').disabled = state.page <= 1; $('next-page').disabled = state.page >= state.totalPages;
     }
     function chime() {
       if (!state.sound) return;
@@ -93,19 +97,26 @@
       const banner = $('alert-banner'); banner.textContent = `${event.severity_level.toUpperCase()} alert: ${event.patient_name} - ${(event.symptoms || []).join(', ') || event.summary}`; banner.classList.remove('hidden'); setTimeout(() => banner.classList.add('hidden'), 7000); chime();
       if ('Notification' in window && Notification.permission === 'granted') new Notification(`Koode ${event.severity_level} alert`, { body: `${event.patient_name}: ${(event.symptoms || []).join(', ') || event.summary}` });
     }
-    async function loadEvents(initial = false) {
+    async function loadPage() {
       try {
-        const query = initial ? '?limit=100' : (state.latest ? `?since=${encodeURIComponent(state.latest)}` : '?limit=100');
-        const response = await fetch(`/api/events/recent${query}`); if (!response.ok) throw new Error('Feed unavailable');
-        const data = await response.json(); data.events.forEach(event => { const isNew = !state.events.has(event.id); state.events.set(event.id, event); if (isNew && !initial) alertFor(event); if (!state.latest || event.created_at > state.latest) state.latest = event.created_at; });
-        render(); $('last-updated').textContent = `Updated ${new Date().toLocaleTimeString()}`; $('connection-status').textContent = 'Live'; $('connection-dot').className = 'h-2 w-2 rounded-full bg-emerald-500';
+        const response = await fetch(`/api/events/recent?page=${state.page}&page_size=${state.pageSize}`); if (!response.ok) throw new Error('Feed unavailable');
+        const data = await response.json(); state.events = data.events; state.page = data.pagination.page; state.pageSize = data.pagination.page_size; state.total = data.pagination.total; state.totalPages = data.pagination.total_pages;
+        if (data.events[0] && (!state.latest || data.events[0].created_at > state.latest)) state.latest = data.events[0].created_at;
+        render(data.counts); $('last-updated').textContent = `Updated ${new Date().toLocaleTimeString()}`; $('connection-status').textContent = 'Live'; $('connection-dot').className = 'h-2 w-2 rounded-full bg-emerald-500';
       } catch (_) { $('connection-status').textContent = 'Reconnecting'; $('connection-dot').className = 'h-2 w-2 rounded-full bg-amber-500'; }
+    }
+    async function pollEvents() {
+      if (!state.latest) return loadPage();
+      try { const response = await fetch(`/api/events/recent?since=${encodeURIComponent(state.latest)}`); if (!response.ok) throw new Error('Feed unavailable'); const data = await response.json(); if (data.events.length) { data.events.forEach(alertFor); state.page = 1; await loadPage(); } } catch (_) { $('connection-status').textContent = 'Reconnecting'; }
     }
     $('notify-button').addEventListener('click', async () => { if (!('Notification' in window)) { $('notify-button').textContent = 'Notifications unavailable'; return; } const permission = await Notification.requestPermission(); $('notify-button').textContent = permission === 'granted' ? 'Notifications enabled' : 'Notifications denied'; });
     $('audio-button').addEventListener('click', () => { state.sound = !state.sound; $('audio-button').textContent = `Sound: ${state.sound ? 'on' : 'off'}`; });
     document.querySelectorAll('.preset').forEach(button => button.addEventListener('click', () => setDates(button.dataset.preset)));
-    $('generate-button').addEventListener('click', async () => { const button = $('generate-button'); button.disabled = true; button.textContent = 'Generating...'; try { const response = await fetch('/api/report/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start_date: $('start-date').value, end_date: $('end-date').value}) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Could not generate report'); $('summary-text').textContent = data.summary; $('print-link').href = data.print_url; $('summary-box').classList.remove('hidden'); } catch (error) { $('summary-text').textContent = error.message; $('summary-box').classList.remove('hidden'); } finally { button.disabled = false; button.textContent = 'Generate AI report'; } });
-    setDates('24h'); loadEvents(true); setInterval(() => loadEvents(false), 5000);
+    $('page-size').addEventListener('change', () => { state.pageSize = Number($('page-size').value); state.page = 1; loadPage(); });
+    $('previous-page').addEventListener('click', () => { if (state.page > 1) { state.page -= 1; loadPage(); } });
+    $('next-page').addEventListener('click', () => { if (state.page < state.totalPages) { state.page += 1; loadPage(); } });
+    $('generate-button').addEventListener('click', async () => { const button = $('generate-button'); button.disabled = true; button.textContent = 'Generating...'; try { const response = await fetch('/api/report/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start_date: $('start-date').value, end_date: $('end-date').value}) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Could not generate report'); $('summary-text').innerHTML = data.summary_html; $('print-link').href = data.print_url; $('summary-box').classList.remove('hidden'); } catch (error) { $('summary-text').textContent = error.message; $('summary-box').classList.remove('hidden'); } finally { button.disabled = false; button.textContent = 'Generate AI report'; } });
+    setDates('24h'); loadPage(); setInterval(pollEvents, 5000);
   </script>
 </body>
 </html>
