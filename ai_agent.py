@@ -40,14 +40,23 @@ def _fallback_extraction(message: str) -> ClinicalExtraction:
     """Keep a judge-friendly demo alive if OPENAI_API_KEY is not configured."""
     lowered = message.lower()
     urgent_words = ("breath", "unconscious", "bleeding", "chest pain", "severe")
+    caregiver_words = ("my father", "my mother", "my patient", "caregiver", "we gave", "i gave")
+    symptom_terms = ("pain", "breathless", "breathing", "nausea", "vomit", "fever", "tired", "sleep")
     severity = "high" if any(word in lowered for word in urgent_words) else "low"
+    user_type = "caregiver" if any(term in lowered for term in caregiver_words) else "patient"
+    symptoms = [term for term in symptom_terms if term in lowered]
+    medications = "Medication mentioned in original message; verify name and dose." if any(term in lowered for term in ("took", "gave", "medication", "tablet")) else ""
     return ClinicalExtraction(
-        user_type="patient",
+        user_type=user_type,
         translated_english_summary="Unstructured message received; clinical details require human review.",
-        symptoms=[],
+        symptoms=symptoms,
         severity_level=severity,
-        medications_given="",
-        whatsapp_reply="I’m here with you. Thank you for telling me. A care team member will review this, and please contact emergency services now if you are in immediate danger.",
+        medications_given=medications,
+        whatsapp_reply=(
+            "Thank you for the update. I’ve recorded it for the care team, and please seek urgent help if the patient is in immediate danger."
+            if user_type == "caregiver"
+            else "I’m here with you. Thank you for telling me. A care team member will review this, and please contact emergency services now if you are in immediate danger."
+        ),
     )
 
 
