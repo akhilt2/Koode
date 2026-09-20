@@ -119,6 +119,7 @@ def _log_to_dict(log: SymptomLog) -> dict:
         symptoms = []
     return {
         "id": log.id,
+        "user_id": log.user_id,
         "created_at": timestamp.astimezone(timezone.utc).isoformat(),
         "time": timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "patient_name": log.user.display_name or log.user.whatsapp_number,
@@ -130,6 +131,20 @@ def _log_to_dict(log: SymptomLog) -> dict:
         "medications_given": log.medications_given or "",
         "whatsapp_reply": log.whatsapp_reply,
     }
+
+
+@app.get("/api/patients")
+def patients(db: Session = Depends(get_db)) -> JSONResponse:
+    """Return selectable WhatsApp participants for dashboard filters."""
+    users = db.scalars(select(User).order_by(User.display_name.asc(), User.whatsapp_number.asc())).all()
+    return JSONResponse(
+        content={
+            "patients": [
+                {"id": user.id, "name": user.display_name or user.whatsapp_number}
+                for user in users
+            ]
+        }
+    )
 
 
 def _markdown_to_html(markdown_text: str) -> Markup:
@@ -206,6 +221,7 @@ def recent_events(
     since: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=5, le=100),
+    patient_id: int | None = Query(default=None, ge=1),
 ) -> JSONResponse:
     """Newest-first paginated feed plus incremental polling support."""
     if since:
@@ -215,33 +231,35 @@ def recent_events(
                 since_dt = since_dt.replace(tzinfo=timezone.utc)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="since must be a valid ISO timestamp") from exc
-        logs = list(
-            db.scalars(
-                select(SymptomLog)
-                .where(SymptomLog.created_at > since_dt)
-                .order_by(SymptomLog.created_at.desc())
-                .limit(100)
-            ).all()
-        )
+        statement = select(SymptomLog).where(SymptomLog.created_at > since_dt)
+        if patient_id is not None:
+            statement = statement.where(SymptomLog.user_id == patient_id)
+        logs = list(db.scalars(statement.order_by(SymptomLog.created_at.desc()).limit(100)).all())
         return JSONResponse(content={"events": [_log_to_dict(log) for log in logs]})
 
-    total = db.scalar(select(func.count()).select_from(SymptomLog)) or 0
+    filters = [SymptomLog.user_id == patient_id] if patient_id is not None else []
+    total = db.scalar(select(func.count()).select_from(SymptomLog).where(*filters)) or 0
     total_pages = max(1, (total + page_size - 1) // page_size)
     if page > total_pages:
         page = total_pages
     logs = list(
         db.scalars(
             select(SymptomLog)
+            .where(*filters)
             .order_by(SymptomLog.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
     )
     attention_count = db.scalar(
-        select(func.count()).select_from(SymptomLog).where(SymptomLog.severity_level.in_(["medium", "high", "critical"]))
+        select(func.count()).select_from(SymptomLog).where(
+            *filters, SymptomLog.severity_level.in_(["medium", "high", "critical"])
+        )
     ) or 0
     urgent_count = db.scalar(
-        select(func.count()).select_from(SymptomLog).where(SymptomLog.severity_level.in_(["high", "critical"]))
+        select(func.count()).select_from(SymptomLog).where(
+            *filters, SymptomLog.severity_level.in_(["high", "critical"])
+        )
     ) or 0
     return JSONResponse(
         content={
@@ -255,23 +273,29 @@ def recent_events(
 class ReportRequest(BaseModel):
     start_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     end_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    patient_id: int | None = Field(default=None, ge=1)
 
 
 @app.post("/api/report/generate")
 def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JSONResponse:
     """Synthesize a selected range and return a link to its print view."""
     start_dt, end_dt, start_label, end_label = _parse_report_range(request.start_date, request.end_date)
-    rows = [_log_to_dict(log) for log in get_logs_by_date_range(db, start_dt, end_dt)]
+    rows = [
+        _log_to_dict(log)
+        for log in get_logs_by_date_range(db, start_dt, end_dt, user_id=request.patient_id)
+    ]
     summary = generate_clinical_summary(rows, start_label, end_label)
     summary_id = uuid.uuid4().hex
     SUMMARY_CACHE[summary_id] = {
         "summary": summary,
         "start_date": start_label,
         "end_date": end_label,
+        "patient_id": request.patient_id,
         "events": rows,
     }
     while len(SUMMARY_CACHE) > 20:
         SUMMARY_CACHE.pop(next(iter(SUMMARY_CACHE)))
+    patient_query = f"&patient_id={request.patient_id}" if request.patient_id is not None else ""
     return JSONResponse(
         content={
             "summary_id": summary_id,
@@ -279,7 +303,7 @@ def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JS
             "summary_html": str(_markdown_to_html(summary)),
             "event_count": len(rows),
             "empty": not rows,
-            "print_url": f"/report/print?start_date={start_label}&end_date={end_label}&summary_id={summary_id}&autoprint=1",
+            "print_url": f"/report/print?start_date={start_label}&end_date={end_label}{patient_query}&summary_id={summary_id}&autoprint=1",
         }
     )
 
@@ -290,14 +314,18 @@ def printable_report(
     start_date: str = Query(...),
     end_date: str = Query(...),
     summary_id: str | None = Query(default=None),
+    patient_id: int | None = Query(default=None, ge=1),
 ) -> HTMLResponse:
     """Render a clean A4 view for browser printing or Save as PDF."""
     start_dt, end_dt, start_label, end_label = _parse_report_range(start_date, end_date)
     cached = SUMMARY_CACHE.get(summary_id or "")
-    if cached and cached["start_date"] == start_label and cached["end_date"] == end_label:
+    if cached and cached["start_date"] == start_label and cached["end_date"] == end_label and cached["patient_id"] == patient_id:
         summary, rows = cached["summary"], cached["events"]
     else:
-        rows = [_log_to_dict(log) for log in get_logs_by_date_range(db, start_dt, end_dt)]
+        rows = [
+            _log_to_dict(log)
+            for log in get_logs_by_date_range(db, start_dt, end_dt, user_id=patient_id)
+        ]
         summary = generate_clinical_summary(rows, start_label, end_label)
     html = templates.get_template("report_print.html").render(
         generated_at=utc_now().strftime("%Y-%m-%d %H:%M UTC"),

@@ -42,9 +42,10 @@
           <button data-preset="month" class="preset rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold hover:bg-koode-50">Current month</button>
         </div>
       </div>
-      <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+      <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
         <label class="text-sm font-semibold text-slate-700">From<input id="start-date" type="date" class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-koode-600 focus:outline-none"></label>
         <label class="text-sm font-semibold text-slate-700">To<input id="end-date" type="date" class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-koode-600 focus:outline-none"></label>
+        <label class="text-sm font-semibold text-slate-700">Patient<select id="patient-filter" class="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal focus:border-koode-600 focus:outline-none"><option value="">All patients</option></select></label>
         <button id="generate-button" class="rounded-lg bg-koode-700 px-5 py-2.5 font-semibold text-white shadow-sm hover:bg-koode-900">Generate AI report</button>
       </div>
       <div id="summary-box" class="mt-5 hidden rounded-xl border border-koode-100 bg-koode-50 p-5"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold text-koode-900">AI executive summary</h3><a id="print-link" target="_blank" class="rounded-lg bg-koode-700 px-3 py-2 text-sm font-semibold text-white hover:bg-koode-900">Open print view</a></div><div id="summary-text" class="mt-3 space-y-3 text-sm leading-6 text-slate-700 [&_h2]:text-lg [&_h2]:font-bold [&_h3]:font-bold [&_h4]:font-semibold [&_p]:mt-2"></div></div>
@@ -59,7 +60,7 @@
   </main>
 
   <script>
-    const state = { events: [], latest: null, sound: true, page: 1, pageSize: 25, totalPages: 1, total: 0 };
+    const state = { events: [], latest: null, sound: true, page: 1, pageSize: 25, totalPages: 1, total: 0, patientId: '' };
     const $ = (id) => document.getElementById(id);
     const dateString = (date) => date.toISOString().slice(0, 10);
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
@@ -99,7 +100,8 @@
     }
     async function loadPage() {
       try {
-        const response = await fetch(`/api/events/recent?page=${state.page}&page_size=${state.pageSize}`); if (!response.ok) throw new Error('Feed unavailable');
+        const patientQuery = state.patientId ? `&patient_id=${encodeURIComponent(state.patientId)}` : '';
+        const response = await fetch(`/api/events/recent?page=${state.page}&page_size=${state.pageSize}${patientQuery}`); if (!response.ok) throw new Error('Feed unavailable');
         const data = await response.json(); state.events = data.events; state.page = data.pagination.page; state.pageSize = data.pagination.page_size; state.total = data.pagination.total; state.totalPages = data.pagination.total_pages;
         if (data.events[0] && (!state.latest || data.events[0].created_at > state.latest)) state.latest = data.events[0].created_at;
         render(data.counts); $('last-updated').textContent = `Updated ${new Date().toLocaleTimeString()}`; $('connection-status').textContent = 'Live'; $('connection-dot').className = 'h-2 w-2 rounded-full bg-emerald-500';
@@ -107,16 +109,18 @@
     }
     async function pollEvents() {
       if (!state.latest) return loadPage();
-      try { const response = await fetch(`/api/events/recent?since=${encodeURIComponent(state.latest)}`); if (!response.ok) throw new Error('Feed unavailable'); const data = await response.json(); if (data.events.length) { data.events.forEach(alertFor); state.page = 1; await loadPage(); } } catch (_) { $('connection-status').textContent = 'Reconnecting'; }
+      try { const patientQuery = state.patientId ? `&patient_id=${encodeURIComponent(state.patientId)}` : ''; const response = await fetch(`/api/events/recent?since=${encodeURIComponent(state.latest)}${patientQuery}`); if (!response.ok) throw new Error('Feed unavailable'); const data = await response.json(); if (data.events.length) { data.events.forEach(alertFor); state.page = 1; await loadPage(); } } catch (_) { $('connection-status').textContent = 'Reconnecting'; }
     }
     $('notify-button').addEventListener('click', async () => { if (!('Notification' in window)) { $('notify-button').textContent = 'Notifications unavailable'; return; } const permission = await Notification.requestPermission(); $('notify-button').textContent = permission === 'granted' ? 'Notifications enabled' : 'Notifications denied'; });
     $('audio-button').addEventListener('click', () => { state.sound = !state.sound; $('audio-button').textContent = `Sound: ${state.sound ? 'on' : 'off'}`; });
     document.querySelectorAll('.preset').forEach(button => button.addEventListener('click', () => setDates(button.dataset.preset)));
     $('page-size').addEventListener('change', () => { state.pageSize = Number($('page-size').value); state.page = 1; loadPage(); });
+    $('patient-filter').addEventListener('change', () => { state.patientId = $('patient-filter').value; state.page = 1; state.latest = null; loadPage(); });
     $('previous-page').addEventListener('click', () => { if (state.page > 1) { state.page -= 1; loadPage(); } });
     $('next-page').addEventListener('click', () => { if (state.page < state.totalPages) { state.page += 1; loadPage(); } });
-    $('generate-button').addEventListener('click', async () => { const button = $('generate-button'); button.disabled = true; button.textContent = 'Generating...'; try { const response = await fetch('/api/report/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start_date: $('start-date').value, end_date: $('end-date').value}) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Could not generate report'); $('summary-text').innerHTML = data.summary_html; $('print-link').href = data.print_url; $('summary-box').classList.remove('hidden'); } catch (error) { $('summary-text').textContent = error.message; $('summary-box').classList.remove('hidden'); } finally { button.disabled = false; button.textContent = 'Generate AI report'; } });
-    setDates('24h'); loadPage(); setInterval(pollEvents, 5000);
+    $('generate-button').addEventListener('click', async () => { const button = $('generate-button'); button.disabled = true; button.textContent = 'Generating...'; try { const response = await fetch('/api/report/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start_date: $('start-date').value, end_date: $('end-date').value, patient_id: state.patientId ? Number(state.patientId) : null}) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Could not generate report'); $('summary-text').innerHTML = data.summary_html; $('print-link').href = data.print_url; $('summary-box').classList.remove('hidden'); } catch (error) { $('summary-text').textContent = error.message; $('summary-box').classList.remove('hidden'); } finally { button.disabled = false; button.textContent = 'Generate AI report'; } });
+    async function loadPatients() { try { const response = await fetch('/api/patients'); const data = await response.json(); $('patient-filter').insertAdjacentHTML('beforeend', data.patients.map(patient => `<option value="${escapeHtml(patient.id)}">${escapeHtml(patient.name)}</option>`).join('')); } catch (_) { /* Patient filtering remains optional if the list request fails. */ } }
+    setDates('24h'); loadPatients(); loadPage(); setInterval(pollEvents, 5000);
   </script>
 </body>
 </html>
