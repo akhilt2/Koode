@@ -6,6 +6,7 @@ the webhook resilient to regional languages, slang, and imperfect formatting.
 
 import logging
 import os
+import json
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -78,3 +79,75 @@ def extract_clinical_event(message: str) -> ClinicalExtraction:
         # Do not lose a patient's message because of a transient model/API error.
         logger.exception("Clinical extraction failed; using fallback")
         return _fallback_extraction(message)
+
+
+SUMMARY_PROMPT = """You are a senior palliative care physician reviewing patient logs from {start_date} to {end_date}.
+Analyze the following chronological events. Produce a rigorous, structured clinical executive summary covering:
+1) Trajectory of Primary Symptoms
+2) Medication Efficacy & Breakout Pain
+3) Red Flags & Urgent Observations
+4) Recommended Care Plan Adjustments
+Be concise, clinical, and objective. Do not diagnose or invent facts. Clearly say when data is unavailable. This is decision support for a qualified clinician, not a replacement for clinical judgment.
+
+Chronological events:
+{events}"""
+
+
+def _fallback_summary(logs: list[dict], start_date: str, end_date: str) -> str:
+    """Provide a useful deterministic report when the model is unavailable."""
+    if not logs:
+        return f"No clinical events were recorded between {start_date} and {end_date}."
+    severity_counts = {}
+    symptoms = []
+    medications = []
+    urgent = []
+    for log in logs:
+        severity = log.get("severity_level", "low")
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        symptoms.extend(log.get("symptoms", []))
+        if log.get("medications_given"):
+            medications.append(log["medications_given"])
+        if severity in {"high", "critical"}:
+            urgent.append(log.get("translated_english_summary", "Urgent event"))
+    symptom_text = ", ".join(dict.fromkeys(symptoms)) or "No specific symptoms recorded."
+    medication_text = "; ".join(dict.fromkeys(medications)) or "No medications or treatments recorded."
+    severity_text = ", ".join(f"{key}: {value}" for key, value in severity_counts.items())
+    urgent_text = "; ".join(urgent) or "No high or critical events recorded."
+    return (
+        f"## Clinical Executive Summary ({start_date} to {end_date})\n\n"
+        f"### 1) Trajectory of Primary Symptoms\n"
+        f"Recorded symptoms: {symptom_text} Events by severity: {severity_text}.\n\n"
+        f"### 2) Medication Efficacy & Breakout Pain\n{medication_text}\n\n"
+        f"### 3) Red Flags & Urgent Observations\n{urgent_text}\n\n"
+        "### 4) Recommended Care Plan Adjustments\n"
+        "Review the chronological events with the responsible palliative-care clinician, confirm symptom trends directly with the patient, and reassess treatment effectiveness and escalation needs."
+    )
+
+
+def generate_clinical_summary(logs: list[dict], start_date: str, end_date: str) -> str:
+    """Generate an AI executive summary, with a deterministic offline fallback."""
+    if not logs:
+        return _fallback_summary(logs, start_date, end_date)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("OPENAI_API_KEY is not set; using deterministic report summary")
+        return _fallback_summary(logs, start_date, end_date)
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, timeout=30.0)
+        completion = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "You write concise clinical summaries in plain text or Markdown."},
+                {"role": "user", "content": SUMMARY_PROMPT.format(start_date=start_date, end_date=end_date, events=json.dumps(logs, ensure_ascii=False))},
+            ],
+        )
+        content = completion.choices[0].message.content
+        if not content:
+            raise ValueError("OpenAI returned an empty clinical summary")
+        return content.strip()
+    except Exception:
+        logger.exception("Clinical summary generation failed; using deterministic fallback")
+        return _fallback_summary(logs, start_date, end_date)

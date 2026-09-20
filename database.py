@@ -2,8 +2,9 @@
 
 from datetime import datetime, timezone
 import os
+from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -66,3 +67,20 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_logs_by_date_range(
+    db, start_date: datetime, end_date: datetime, user_id: Optional[int] = None
+) -> list[SymptomLog]:
+    """Return chronological logs in a half-open UTC date range.
+
+    Keeping this query in the data layer lets the dashboard, AI report endpoint,
+    and printable report share exactly the same filtering behavior.
+    """
+    statement = select(SymptomLog).where(
+        SymptomLog.created_at >= start_date,
+        SymptomLog.created_at <= end_date,
+    )
+    if user_id is not None:
+        statement = statement.where(SymptomLog.user_id == user_id)
+    return list(db.scalars(statement.order_by(SymptomLog.created_at.asc())).all())

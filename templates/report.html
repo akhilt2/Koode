@@ -19,7 +19,7 @@
 </head>
 <body>
   <h1>Koode Clinical Timeline</h1>
-  <div class="meta">Last 72 hours · Generated {{ generated_at }}</div>
+  <div class="meta">Last 72 hours - Generated {{ generated_at }}</div>
   {% if urgent_count %}
   <div class="alert"><strong>Clinical attention recommended:</strong> {{ urgent_count }} high or critical event(s) are included below.</div>
   {% else %}
@@ -30,7 +30,7 @@
     <thead><tr><th>Time</th><th>Person</th><th>Type</th><th>Clinical summary</th><th>Symptoms</th><th>Severity</th><th>Medication / treatment</th></tr></thead>
     <tbody>
     {% for row in rows %}
-      <tr><td>{{ row.time }}</td><td>{{ row.name }}</td><td>{{ row.user_type }}</td><td>{{ row.summary }}</td><td>{{ row.symptoms or 'None identified' }}</td><td class="{{ row.severity }}">{{ row.severity }}</td><td>{{ row.medications }}</td></tr>
+      <tr><td>{{ row.time }}</td><td>{{ row.patient_name }}</td><td>{{ row.user_type }}</td><td>{{ row.summary }}</td><td>{{ row.symptoms|join(', ') or 'None identified' }}</td><td class="{{ row.severity_level }}">{{ row.severity_level }}</td><td>{{ row.medications_given or 'None recorded' }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

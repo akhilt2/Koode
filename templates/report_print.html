@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Koode clinical report</title>
+  <style>
+    :root { color: #17202a; font-family: Arial, sans-serif; }
+    body { margin: 0 auto; max-width: 1100px; padding: 34px; font-size: 12px; line-height: 1.45; }
+    header { border-bottom: 3px solid #0f766e; padding-bottom: 16px; display: flex; justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; color: #115e59; font-size: 25px; } h2 { color: #115e59; font-size: 16px; margin: 22px 0 8px; }
+    .muted { color: #52606d; } .summary { background: #effcfb; border: 1px solid #99f6e4; border-left: 5px solid #0f766e; padding: 16px; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; } th, td { border: 1px solid #cbd5e1; padding: 7px; text-align: left; vertical-align: top; } th { background: #e2e8f0; }
+    .high, .critical { color: #b91c1c; font-weight: bold; } .medium { color: #a16207; font-weight: bold; }
+    .event { break-inside: avoid; } @page { size: A4; margin: 14mm; } @media print { body { padding: 0; } .no-print { display: none; } tr { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <header><div><h1>Koode Clinical Report</h1><div class="muted">Palliative care monitoring and symptom timeline</div><div><strong>Patient identifier:</strong> {{ patient_identifier }}</div></div><div class="muted">Period: {{ start_date }} to {{ end_date }}<br>Generated: {{ generated_at }}</div></header>
+  <section><h2>AI Executive Summary</h2><div class="summary">{{ summary }}</div></section>
+  <section><h2>Chronological Events ({{ rows|length }})</h2>
+    {% if rows %}<table><thead><tr><th>Timestamp</th><th>Patient / type</th><th>Symptoms</th><th>Clinical summary</th><th>Medication / treatment</th><th>Severity</th></tr></thead><tbody>
+    {% for row in rows %}<tr class="event"><td>{{ row.time }}</td><td>{{ row.patient_name }}<br><span class="muted">{{ row.user_type }}</span></td><td>{{ row.symptoms|join(', ') or 'None identified' }}</td><td>{{ row.summary }}</td><td>{{ row.medications_given or 'None recorded' }}</td><td class="{{ row.severity_level }}">{{ row.severity_level }}</td></tr>{% endfor %}
+    </tbody></table>{% else %}<p class="muted">No clinical events were recorded for this date range.</p>{% endif %}
+  </section>
+  <p class="no-print muted">Use your browser's Print command and choose Save as PDF.</p>
+  <script>window.addEventListener('load', () => { if (new URLSearchParams(window.location.search).get('autoprint') === '1') window.print(); });</script>
+</body>
+</html>

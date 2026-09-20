@@ -7,7 +7,9 @@ Koode is a compassionate WhatsApp-based palliative-care assistant for symptom tr
 - **FastAPI** receives Twilio WhatsApp webhooks and returns TwiML.
 - **OpenAI Structured Outputs** classifies the sender and extracts a strict `ClinicalExtraction` object.
 - **SQLite + SQLAlchemy** stores users and symptom logs in `koode.db`.
-- **Jinja2** renders a responsive clinical timeline at `/report`, which can be printed or saved as PDF from a browser.
+- **Jinja2 + Tailwind CDN + vanilla JavaScript** render a live monitoring dashboard at `/dashboard`.
+- **Polling** refreshes `/api/events/recent` every five seconds without a WebSocket or Node build.
+- **AI reporting** generates date-filtered summaries at `/api/report/generate`; `/report/print` is optimized for Save as PDF.
 
 ## Setup
 
@@ -61,7 +63,7 @@ curl -X POST http://localhost:8000/webhook/whatsapp \
   --data-urlencode 'Body=My pain is medium today and I took paracetamol'
 ```
 
-The response is TwiML XML. Open `http://localhost:8000/report` to see all events from the previous 72 hours. Use the browser print dialog to export the phone-friendly report as a PDF.
+The response is TwiML XML. Open `http://localhost:8000/dashboard` to monitor live events. The dashboard supports Last 24 Hours, Last 7 Days, Current Month, and custom date ranges. Enable browser notifications and sound if desired, then click **Generate AI report**. The result opens `/report/print` in a clean print view; use the browser print dialog to save it as PDF. The original `/report` 72-hour view remains available.
 
 ## Data and safety
 
@@ -69,7 +71,9 @@ The local database is created automatically at `koode.db`. The AI prompt explici
 
 ## Files
 
-- `main.py`: FastAPI app, Twilio validation/webhook, persistence, and report endpoint.
-- `ai_agent.py`: system prompt, Pydantic schema, OpenAI Structured Outputs, and API fallback.
-- `database.py`: SQLAlchemy engine, `User` and `SymptomLog` models, and DB dependency.
-- `templates/report.html`: responsive, printable 72-hour clinical timeline.
+- `main.py`: FastAPI app, Twilio validation/webhook, live polling API, report generation, and print routes.
+- `ai_agent.py`: event extraction, clinical summary prompt, and deterministic fallbacks.
+- `database.py`: SQLAlchemy engine, models, DB dependency, and date-range query helper.
+- `templates/dashboard.html`: responsive monitoring dashboard with alerts, sound, notifications, and filters.
+- `templates/report_print.html`: high-contrast A4 clinical report template.
+- `templates/report.html`: legacy printable 72-hour clinical timeline.
