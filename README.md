@@ -55,13 +55,11 @@ AI helped turn unstructured WhatsApp messages into a working care coordination p
 
 ### Live Demo
 
-[Open the Koode demo](https://drive.google.com/file/d/1HNfXYDBg8Vw0pVd34JYCXzI0oiZt0JST/view?usp=sharing)
+[Open the Koode live dashboard](https://tartness-divorcee-unaudited.ngrok-free.dev/dashboard)
 
 ### Demo / Pitch Video
 
-Add your demo or pitch video link here.
-
-*A short demo/pitch video is strongly recommended. Show the WhatsApp message flow, dashboard alerts, patient filtering, resolved workflow, and AI report export.*
+[Watch the Koode demo video](https://drive.google.com/file/d/1HNfXYDBg8Vw0pVd34JYCXzI0oiZt0JST/view?usp=sharing)
 
 ## Screenshots
 
