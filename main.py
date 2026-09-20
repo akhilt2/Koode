@@ -1,5 +1,9 @@
 """Koode: compassionate WhatsApp symptom tracking and care monitoring."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import json
 import logging
 import os

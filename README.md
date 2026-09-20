@@ -23,17 +23,22 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Set `OPENAI_API_KEY` in `.env` for AI extraction. The server deliberately has a safe fallback mode when the key is missing, so the webhook can still be demonstrated. For real clinical use, configure the key and never treat automated extraction as a diagnosis.
-
-Load environment variables in your shell before starting:
+Set the values in `.env`. Koode loads this file automatically when the application starts:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export TWILIO_AUTH_TOKEN="your-twilio-auth-token"
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+DATABASE_URL=sqlite:///./koode.db
+```
+
+Start the server without exporting variables manually:
+
+```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-On Windows PowerShell, use `$env:OPENAI_API_KEY="sk-..."` and `$env:TWILIO_AUTH_TOKEN="..."` instead. The same server can be started with `python main.py`.
+The same server can be started with `python main.py`. Keep `.env` private; it is excluded by `.gitignore`. If `OPENAI_API_KEY` is missing, Koode uses its safe local fallback mode.
 
 ## Connect the Twilio Sandbox
 

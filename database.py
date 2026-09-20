@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+
+load_dotenv()
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./koode.db")
