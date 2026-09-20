@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -51,13 +51,19 @@ class SymptomLog(Base):
     severity_level: Mapped[str] = mapped_column(String(20), index=True)
     medications_given: Mapped[str] = mapped_column(Text, default="")
     whatsapp_reply: Mapped[str] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     user: Mapped[User] = relationship(back_populates="logs")
 
 
 def init_db() -> None:
-    """Create tables on startup; SQLite does not require migrations for the demo."""
+    """Create tables and add the resolved flag to existing hackathon databases."""
     Base.metadata.create_all(bind=engine)
+    if "symptom_logs" in inspect(engine).get_table_names():
+        columns = {column["name"] for column in inspect(engine).get_columns("symptom_logs")}
+        if "resolved" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE symptom_logs ADD COLUMN resolved BOOLEAN NOT NULL DEFAULT 0"))
 
 
 def get_db():
@@ -70,7 +76,11 @@ def get_db():
 
 
 def get_logs_by_date_range(
-    db, start_date: datetime, end_date: datetime, user_id: Optional[int] = None
+    db,
+    start_date: datetime,
+    end_date: datetime,
+    user_id: Optional[int] = None,
+    include_resolved: bool = False,
 ) -> list[SymptomLog]:
     """Return chronological logs in a half-open UTC date range.
 
@@ -83,4 +93,6 @@ def get_logs_by_date_range(
     )
     if user_id is not None:
         statement = statement.where(SymptomLog.user_id == user_id)
+    if not include_resolved:
+        statement = statement.where(SymptomLog.resolved.is_(False))
     return list(db.scalars(statement.order_by(SymptomLog.created_at.asc())).all())

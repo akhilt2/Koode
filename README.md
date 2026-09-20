@@ -10,6 +10,7 @@ Koode is a compassionate WhatsApp-based palliative-care assistant for symptom tr
 - **Jinja2 + Tailwind CDN + vanilla JavaScript** render a live monitoring dashboard at `/dashboard`.
 - **Polling** refreshes `/api/events/recent` every five seconds without a WebSocket or Node build.
 - **AI reporting** generates date-filtered summaries at `/api/report/generate`; `/report/print` is optimized for Save as PDF.
+- **Issue workflow** lets care teams mark events resolved or reopen them, filter the live feed by all, medium/high attention, or high/critical urgency, and choose whether reports include resolved events.
 
 ## Setup
 
@@ -64,6 +65,8 @@ curl -X POST http://localhost:8000/webhook/whatsapp \
 ```
 
 The response is TwiML XML. Open `http://localhost:8000/dashboard` to monitor live events. The dashboard supports Last 24 Hours, Last 7 Days, Current Month, and custom date ranges. Enable browser notifications and sound if desired, then click **Generate AI report**. The result opens `/report/print` in a clean print view; use the browser print dialog to save it as PDF. The original `/report` 72-hour view remains available.
+
+Click **Mark resolved** on an event to remove it from the default open-issues feed. Use **Include resolved** to bring resolved events back. The three summary cards are interactive: **Events in feed** shows all matching events, **Needs attention** shows medium/high events, and **High / critical** shows urgent events. The patient selector applies to both the feed and generated reports.
 
 ## Data and safety
 

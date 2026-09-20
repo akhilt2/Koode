@@ -130,6 +130,7 @@ def _log_to_dict(log: SymptomLog) -> dict:
         "severity_level": log.severity_level,
         "medications_given": log.medications_given or "",
         "whatsapp_reply": log.whatsapp_reply,
+        "resolved": log.resolved,
     }
 
 
@@ -215,6 +216,22 @@ def _parse_report_range(start_date: str, end_date: str) -> tuple[datetime, datet
     )
 
 
+class EventResolution(BaseModel):
+    resolved: bool = True
+
+
+@app.post("/api/events/{event_id}/resolve")
+def resolve_event(event_id: int, request: EventResolution, db: Session = Depends(get_db)) -> JSONResponse:
+    """Mark an event resolved or reopen it for continued monitoring."""
+    event = db.get(SymptomLog, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event.resolved = request.resolved
+    db.commit()
+    db.refresh(event)
+    return JSONResponse(content={"event": _log_to_dict(event)})
+
+
 @app.get("/api/events/recent")
 def recent_events(
     db: Session = Depends(get_db),
@@ -222,6 +239,8 @@ def recent_events(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=5, le=100),
     patient_id: int | None = Query(default=None, ge=1),
+    severity_group: str = Query(default="all", pattern="^(all|attention|urgent)$"),
+    include_resolved: bool = Query(default=False),
 ) -> JSONResponse:
     """Newest-first paginated feed plus incremental polling support."""
     if since:
@@ -234,10 +253,22 @@ def recent_events(
         statement = select(SymptomLog).where(SymptomLog.created_at > since_dt)
         if patient_id is not None:
             statement = statement.where(SymptomLog.user_id == patient_id)
+        if not include_resolved:
+            statement = statement.where(SymptomLog.resolved.is_(False))
+        if severity_group == "attention":
+            statement = statement.where(SymptomLog.severity_level.in_(["medium", "high"]))
+        elif severity_group == "urgent":
+            statement = statement.where(SymptomLog.severity_level.in_(["high", "critical"]))
         logs = list(db.scalars(statement.order_by(SymptomLog.created_at.desc()).limit(100)).all())
         return JSONResponse(content={"events": [_log_to_dict(log) for log in logs]})
 
     filters = [SymptomLog.user_id == patient_id] if patient_id is not None else []
+    if not include_resolved:
+        filters.append(SymptomLog.resolved.is_(False))
+    if severity_group == "attention":
+        filters.append(SymptomLog.severity_level.in_(["medium", "high"]))
+    elif severity_group == "urgent":
+        filters.append(SymptomLog.severity_level.in_(["high", "critical"]))
     total = db.scalar(select(func.count()).select_from(SymptomLog).where(*filters)) or 0
     total_pages = max(1, (total + page_size - 1) // page_size)
     if page > total_pages:
@@ -274,6 +305,7 @@ class ReportRequest(BaseModel):
     start_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     end_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     patient_id: int | None = Field(default=None, ge=1)
+    include_resolved: bool = False
 
 
 @app.post("/api/report/generate")
@@ -282,7 +314,9 @@ def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JS
     start_dt, end_dt, start_label, end_label = _parse_report_range(request.start_date, request.end_date)
     rows = [
         _log_to_dict(log)
-        for log in get_logs_by_date_range(db, start_dt, end_dt, user_id=request.patient_id)
+        for log in get_logs_by_date_range(
+            db, start_dt, end_dt, user_id=request.patient_id, include_resolved=request.include_resolved
+        )
     ]
     summary = generate_clinical_summary(rows, start_label, end_label)
     summary_id = uuid.uuid4().hex
@@ -291,11 +325,13 @@ def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JS
         "start_date": start_label,
         "end_date": end_label,
         "patient_id": request.patient_id,
+        "include_resolved": request.include_resolved,
         "events": rows,
     }
     while len(SUMMARY_CACHE) > 20:
         SUMMARY_CACHE.pop(next(iter(SUMMARY_CACHE)))
     patient_query = f"&patient_id={request.patient_id}" if request.patient_id is not None else ""
+    resolved_query = "&include_resolved=true" if request.include_resolved else ""
     return JSONResponse(
         content={
             "summary_id": summary_id,
@@ -303,7 +339,7 @@ def generate_report(request: ReportRequest, db: Session = Depends(get_db)) -> JS
             "summary_html": str(_markdown_to_html(summary)),
             "event_count": len(rows),
             "empty": not rows,
-            "print_url": f"/report/print?start_date={start_label}&end_date={end_label}{patient_query}&summary_id={summary_id}&autoprint=1",
+            "print_url": f"/report/print?start_date={start_label}&end_date={end_label}{patient_query}{resolved_query}&summary_id={summary_id}&autoprint=1",
         }
     )
 
@@ -315,16 +351,25 @@ def printable_report(
     end_date: str = Query(...),
     summary_id: str | None = Query(default=None),
     patient_id: int | None = Query(default=None, ge=1),
+    include_resolved: bool = Query(default=False),
 ) -> HTMLResponse:
     """Render a clean A4 view for browser printing or Save as PDF."""
     start_dt, end_dt, start_label, end_label = _parse_report_range(start_date, end_date)
     cached = SUMMARY_CACHE.get(summary_id or "")
-    if cached and cached["start_date"] == start_label and cached["end_date"] == end_label and cached["patient_id"] == patient_id:
+    if (
+        cached
+        and cached["start_date"] == start_label
+        and cached["end_date"] == end_label
+        and cached["patient_id"] == patient_id
+        and cached["include_resolved"] == include_resolved
+    ):
         summary, rows = cached["summary"], cached["events"]
     else:
         rows = [
             _log_to_dict(log)
-            for log in get_logs_by_date_range(db, start_dt, end_dt, user_id=patient_id)
+            for log in get_logs_by_date_range(
+                db, start_dt, end_dt, user_id=patient_id, include_resolved=include_resolved
+            )
         ]
         summary = generate_clinical_summary(rows, start_label, end_label)
     html = templates.get_template("report_print.html").render(
