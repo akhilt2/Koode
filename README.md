@@ -55,13 +55,7 @@ AI helped turn unstructured WhatsApp messages into a working care coordination p
 
 ### Live Demo
 
-Add your deployed project link here, if available.
-
-Local dashboard:
-
-```text
-http://localhost:8000/dashboard
-```
+[Open the Koode demo](https://drive.google.com/file/d/1HNfXYDBg8Vw0pVd34JYCXzI0oiZt0JST/view?usp=sharing)
 
 ### Demo / Pitch Video
 
@@ -71,7 +65,17 @@ Add your demo or pitch video link here.
 
 ## Screenshots
 
-Add screenshots of the Koode dashboard, WhatsApp response, alert filtering, and printable report here.
+### Koode Monitoring Dashboard
+
+![Koode monitoring dashboard](images/Koode_Dashboard.png)
+
+### All Patients AI Summary
+
+![Koode AI summary for all patients](images/all_patients_ai_summary.png)
+
+### Patient-Specific AI Summary
+
+![Koode AI summary for Patient Beta](images/patient_beta_ai_summary.png)
 
 ## How to Run Locally
 
@@ -114,6 +118,4 @@ curl -X POST http://localhost:8000/webhook/whatsapp \
 
 ## Additional Notes
 
-Koode is a hackathon prototype and not an emergency service, diagnostic system, or replacement for a qualified clinician. The AI is instructed not to diagnose or invent medication, and urgent messages should still be reviewed by a human care team.
-
-The application stores timestamps internally in UTC for reliable querying and displays user-facing timestamps in IST. SQLite creates `koode.db` automatically. The `.env` file and database are excluded from Git. Future improvements could include authentication, role-based access, encrypted production storage, durable multi-worker summary caching, clinician-to-patient assignment, and deployment monitoring.
+Koode not a qualified clinician. The AI is instructed not to diagnose or invent medication, and urgent messages should still be reviewed by a human care team.
